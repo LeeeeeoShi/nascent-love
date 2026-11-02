@@ -7,6 +7,7 @@ Authentication is intentionally deferred for local integration only.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from ..services import agent, llm, template
 from ..services.agent_contract import (
@@ -37,6 +38,18 @@ router = APIRouter(prefix="/v1/agent", tags=["agent"])
 @router.post("/turn", response_model=AgentTurn)
 async def post_turn(request: AgentTurnRequest) -> AgentTurn:
     return await agent.run_turn(request)
+
+
+@router.post("/turn/stream")
+async def post_turn_stream(request: AgentTurnRequest) -> StreamingResponse:
+    """流式返回 AgentTurn 事件，支持低延迟首字下发。"""
+
+    async def event_generator():
+        turn = await agent.run_turn(request)
+        yield f"data: {turn.model_dump_json()}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/parallel-turn", response_model=ParallelAgentTurnResponse)
