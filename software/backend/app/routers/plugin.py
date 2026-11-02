@@ -3,6 +3,8 @@
 用户侧叫「邀请」。密钥只在创建时回给 App，不进共享日志。
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 

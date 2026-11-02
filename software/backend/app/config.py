@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     mimo_model: str = "mimo-v2.5-tts"
     tts_provider: str = "minimax"
 
+    # 私有化/本地推理配置（支持 vLLM, Ollama, 自建 GPU 算力）
+    private_inference_url: str = ""
+    uncensored_mode: bool = False
+
     # 内容审核开关。默认开着——关掉它是个需要明确动作的决定，
     # 不该因为忘配环境变量而悄悄失效。
     moderation_enabled: bool = True
@@ -113,6 +117,12 @@ class Settings(BaseSettings):
         if self.llm_provider == "anthropic":
             return self.llm_base_url or "https://api.anthropic.com"
         return self.llm_base_url
+
+    @property
+    def resolved_chat_base_url(self) -> str:
+        if self.private_inference_url:
+            return normalize_llm_base_url(self.private_inference_url)
+        return self.resolved_llm_base_url
 
     @property
     def resolved_speech_api_key(self) -> str:

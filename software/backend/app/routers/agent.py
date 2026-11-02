@@ -4,6 +4,8 @@ The routes return dialogue, performance and preference suggestions, never device
 Authentication is intentionally deferred for local integration only.
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException, Query
 
 from ..services import agent, llm, template

@@ -121,6 +121,9 @@ const ui = {
   toastTimer: null,
   sheet: null,
   draftLevel: null,
+  aftercareActive: false,
+  aftercareSoundOn: false,
+  gestureBlindMode: true,
   scenarioStarted: false,
   scene: 0,
   personas: [],
@@ -834,6 +837,156 @@ function entry(page, ico, title, subtitle) {
   </button>`;
 }
 
+// 屏幕防休眠 (Screen Wake Lock API) —— 防止平放时屏幕熄灭挂起 JS 导致看门狗误断链
+let screenWakeLock = null;
+async function requestScreenWakeLock() {
+  if ("wakeLock" in navigator && !screenWakeLock) {
+    try {
+      screenWakeLock = await navigator.wakeLock.request("screen");
+      screenWakeLock.addEventListener("release", () => {
+        screenWakeLock = null;
+      });
+    } catch (_) {}
+  }
+}
+function releaseScreenWakeLock() {
+  if (screenWakeLock) {
+    screenWakeLock.release().catch(() => {});
+    screenWakeLock = null;
+  }
+}
+
+// 事后温存舒缓雨声/白噪音 (Web Audio API 本地离线合成，零网络开销)
+let aftercareAudioCtx = null;
+let aftercareNoiseNode = null;
+function toggleAftercareSound(enable) {
+  if (!enable) {
+    if (aftercareNoiseNode) {
+      try { aftercareNoiseNode.stop(); aftercareNoiseNode.disconnect(); } catch (_) {}
+      aftercareNoiseNode = null;
+    }
+    if (aftercareAudioCtx) {
+      aftercareAudioCtx.close().catch(() => {});
+      aftercareAudioCtx = null;
+    }
+    return false;
+  }
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return false;
+    aftercareAudioCtx = new AudioCtx();
+    const bufferSize = aftercareAudioCtx.sampleRate * 2;
+    const buffer = aftercareAudioCtx.createBuffer(1, bufferSize, aftercareAudioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let lastOut = 0.0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      data[i] = (lastOut + 0.02 * white) / 1.02;
+      lastOut = data[i];
+      data[i] *= 2.0;
+    }
+    aftercareNoiseNode = aftercareAudioCtx.createBufferSource();
+    aftercareNoiseNode.buffer = buffer;
+    aftercareNoiseNode.loop = true;
+
+    const filter = aftercareAudioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 450;
+
+    const gain = aftercareAudioCtx.createGain();
+    gain.gain.setValueAtTime(0.01, aftercareAudioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.06, aftercareAudioCtx.currentTime + 1.5);
+
+    aftercareNoiseNode.connect(filter);
+    filter.connect(gain);
+    gain.connect(aftercareAudioCtx.destination);
+    aftercareNoiseNode.start();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// 沉浸手势盲操事件监听
+function setupGestureTouchSurface(container) {
+  const surface = container.querySelector("#gesture-touch-surface");
+  if (!surface || surface.dataset.gestureAttached === "1") return;
+  surface.dataset.gestureAttached = "1";
+
+  let touchStartY = 0;
+  let touchStartX = 0;
+  let longPressTimer = null;
+  let moved = false;
+
+  surface.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    touchStartY = touch.clientY;
+    touchStartX = touch.clientX;
+    moved = false;
+
+    clearTimeout(longPressTimer);
+    longPressTimer = setTimeout(() => {
+      if (!moved) {
+        if ("vibrate" in navigator) {
+          try { navigator.vibrate([25, 40]); } catch (_) {}
+        }
+        ui.draftLevel = 0;
+        emit(new BleDownlink({ cmd: NlCmd.SET_LEVEL, level: 0, auth: "" }));
+        toast("长按触发柔和暂停");
+        render();
+      }
+    }, 800);
+  }, { passive: true });
+
+  surface.addEventListener("touchmove", (e) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const diffY = touch.clientY - touchStartY;
+    const diffX = touch.clientX - touchStartX;
+
+    if (Math.abs(diffY) > 15 || Math.abs(diffX) > 15) {
+      moved = true;
+      clearTimeout(longPressTimer);
+    }
+
+    // 上滑切高档 (向上滑动 > 40px)
+    if (diffY < -42) {
+      touchStartY = touch.clientY;
+      const uplink = getUplink();
+      const cur = ui.draftLevel ?? (uplink?.level > 0 ? uplink.level : 1);
+      if (cur < NlConst.levelMax) {
+        const next = Math.min(cur + 1, NlConst.levelMax);
+        ui.draftLevel = next;
+        if ("vibrate" in navigator) {
+          try { navigator.vibrate([15]); } catch (_) {}
+        }
+        emit(new BleDownlink({ cmd: NlCmd.SET_LEVEL, level: next, auth: "" }));
+        render();
+      }
+    }
+    // 下滑切低档 (向下滑动 > 40px)
+    else if (diffY > 42) {
+      touchStartY = touch.clientY;
+      const uplink = getUplink();
+      const cur = ui.draftLevel ?? (uplink?.level > 0 ? uplink.level : 1);
+      if (cur > 1) {
+        const next = Math.max(cur - 1, 1);
+        ui.draftLevel = next;
+        if ("vibrate" in navigator) {
+          try { navigator.vibrate([15]); } catch (_) {}
+        }
+        emit(new BleDownlink({ cmd: NlCmd.SET_LEVEL, level: next, auth: "" }));
+        render();
+      }
+    }
+  }, { passive: true });
+
+  surface.addEventListener("touchend", () => {
+    clearTimeout(longPressTimer);
+  }, { passive: true });
+}
+
 function renderControl() {
   const connected = getConnected();
   const uplink = getUplink();
@@ -842,19 +995,68 @@ function renderControl() {
   const level = ui.draftLevel ?? (reported > 0 ? reported : 1);
   const mode = uplink?.mode ?? NlMode.FREE;
   const disabled = connected ? "" : "disabled";
+
+  if (ui.aftercareActive) {
+    return `${topbar("身心舒缓", { back: true })}
+    <main class="page control-page page-with-float aftercare-active">
+      <div class="aftercare-card">
+        <div class="aftercare-glow"></div>
+        <div class="aftercare-icon">🌸</div>
+        <h3 class="aftercare-title">事后温存 · 抚慰时刻</h3>
+        <p class="aftercare-quote">“（轻声为你拉好被子）还好吗？现在完全放松就好，喝点温水，我一直在这陪着你。”</p>
+        
+        <div class="aftercare-sound-toggle">
+          <button class="sound-btn ${ui.aftercareSoundOn ? "active" : ""}" data-act="toggle-aftercare-sound">
+            ${ui.aftercareSoundOn ? "🔊 舒缓雨声播放中" : "🔈 开启舒缓白噪音"}
+          </button>
+        </div>
+
+        <div class="aftercare-feedback">
+          <div class="feedback-hint">刚才身体感觉如何？（自动沉淀至身心偏好）</div>
+          <div class="feedback-chips">
+            <button class="chip-btn" data-act="aftercare-feedback" data-val="很舒服，节奏刚刚好">很舒服，刚刚好</button>
+            <button class="chip-btn" data-act="aftercare-feedback" data-val="节奏有点快，想要更慢更轻">有点快，想要更慢</button>
+            <button class="chip-btn" data-act="aftercare-feedback" data-val="感觉还可以，继续探索">还可以，继续探索</button>
+          </div>
+        </div>
+
+        <button class="aftercare-dismiss" data-act="dismiss-aftercare">休息好了，回到控制</button>
+      </div>
+    </main>`;
+  }
+
   return `${topbar("自我控制", { back: true })}
   ${floatingDeviceBar({ connectable: true, trailing: connected ? "check" : "chevron" })}
-  <main class="page control-page page-with-float">
-    <button class="stop" data-act="stop">${icon("stop")} 停 止</button>
+  <main class="page control-page page-with-float ${ui.gestureBlindMode ? "blind-mode" : ""}">
+    <button class="stop fullwidth-emergency-stop" data-act="stop">${icon("stop")} 紧急停止（触碰即停）</button>
     <div class="power-actions" aria-label="设备电源">
       <button class="power-on ${reported > 0 ? "active" : ""}" data-act="power-on" ${disabled}>开启</button>
       <button class="power-off ${reported === 0 ? "active" : ""}" data-act="power-off" ${disabled}>关闭</button>
+      <button class="mode-toggle-btn ${ui.gestureBlindMode ? "active" : ""}" data-act="toggle-blind-mode">
+        ${ui.gestureBlindMode ? "🌙 盲操沉浸" : "🎛️ 经典滑块"}
+      </button>
     </div>
-    <p class="power-hint">停止后，请在设备上确认恢复。</p>
+    <p class="power-hint">停止后，长按玩具侧 BOOT 键 2 秒物理确认恢复。</p>
+
+    ${ui.gestureBlindMode ? `
+    <div class="gesture-surface" id="gesture-touch-surface" aria-label="全屏盲操区域">
+      <div class="gesture-cue">
+        <span class="gesture-arrow">↕</span>
+        <span class="gesture-text">屏幕任意处上下滑动调档 · 长按柔和暂停</span>
+      </div>
+      <div class="gesture-level-display">
+        <span class="level-big">${reported > 0 ? reported : level}</span>
+        <span class="level-unit">/ ${NlConst.levelMax} 档</span>
+      </div>
+      <div class="gesture-halo"></div>
+    </div>
+    ` : `
     <div class="control-stage">
       <div class="level" data-level-label>${reported === 0 ? "启动" : "档位"} ${level} / ${NlConst.levelMax}</div>
       <input id="level-slider" type="range" min="1" max="${NlConst.levelMax}" step="1" value="${level}" ${disabled} />
     </div>
+    `}
+
     <div class="modes">
       ${[
         [NlMode.FREE, "手动"],
@@ -2991,6 +3193,11 @@ function render() {
   }
 
   const { tab, page, sub, id, sessionId, view, query } = route();
+  if (tab === "intimacy" || getConnected()) {
+    requestScreenWakeLock();
+  } else {
+    releaseScreenWakeLock();
+  }
   applyTheme(tab === "lab" ? "settings" : tab);
   const nested = (tab === "intimacy" && page !== "root")
     || (tab === "settings" && page !== "root")
@@ -3115,6 +3322,7 @@ function bind() {
   bindHoldMic();
   bindCallSwipe();
   bindPersonaSwipe();
+  setupGestureTouchSurface(root);
   root.querySelectorAll("[data-act=lab-check]").forEach((el) => {
     el.addEventListener("change", () => saveCheck(el.dataset.id, el.checked));
   });
@@ -3550,7 +3758,38 @@ async function onClick(event) {
   else if (act === "stop") {
     ui.draftLevel = null;
     stopScenarioAutomation();
+    if ("vibrate" in navigator) {
+      try { navigator.vibrate([40, 50, 40]); } catch (_) {}
+    }
     await emit(new BleDownlink({ cmd: NlCmd.STOP, auth: "" }));
+    ui.aftercareActive = true;
+    render();
+  }
+  else if (act === "toggle-aftercare-sound") {
+    ui.aftercareSoundOn = !ui.aftercareSoundOn;
+    toggleAftercareSound(ui.aftercareSoundOn);
+    render();
+  }
+  else if (act === "aftercare-feedback") {
+    const feedbackVal = t.dataset.val;
+    if (feedbackVal) {
+      bodyNotes.appendQuickNote(`身心偏好觉察：${feedbackVal}`);
+      toast("身心偏好已悄悄记下");
+    }
+    ui.aftercareActive = false;
+    toggleAftercareSound(false);
+    ui.aftercareSoundOn = false;
+    render();
+  }
+  else if (act === "dismiss-aftercare") {
+    ui.aftercareActive = false;
+    toggleAftercareSound(false);
+    ui.aftercareSoundOn = false;
+    render();
+  }
+  else if (act === "toggle-blind-mode") {
+    ui.gestureBlindMode = !ui.gestureBlindMode;
+    toast(ui.gestureBlindMode ? "已开启全屏盲操模式" : "已切换为经典调档模式");
     render();
   }
   else if (act === "scenario-start-auto") {

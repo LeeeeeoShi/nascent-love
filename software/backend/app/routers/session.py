@@ -1,5 +1,7 @@
 """会话路由：收摘要，回建议。"""
 
+from __future__ import annotations
+
 from fastapi import APIRouter
 
 from ..protocol import CloudActionEnvelope, CloudSummary

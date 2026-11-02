@@ -8,7 +8,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException

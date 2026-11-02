@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from .agent_contract import AgentTurnRequest, MemoryItem
+from .metaphorizer import metaphorize_text
 from .personas.builtin_001 import CHAR_NAME as BUILTIN_001_CHAR_NAME
 from .personas.builtin_001 import fill_system_prompt, is_builtin_001
 
@@ -107,7 +108,7 @@ def _history_messages(
         content = str(turn.get("content") or "").strip()[:2000]
         if role not in {"user", "assistant"} or not content:
             continue
-        history.append({"role": role, "content": content})
+        history.append({"role": role, "content": metaphorize_text(content)})
     if history and history[-1]["role"] == "user" and history[-1]["content"] == current:
         history.pop()
     return history
@@ -150,7 +151,7 @@ def build_messages(request: AgentTurnRequest, memories: list[MemoryItem]) -> lis
         {
             "role": "user",
             "content": (
-                f"她说：{request.user_input}\n"
+                f"她说：{metaphorize_text(request.user_input)}\n"
                 "接上刚才的对话。若摘要里有更早的对话，也要接上。"
                 "用角色卡的口吻回一两句完整的简体中文。只输出 JSON。"
             ),

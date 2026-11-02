@@ -5,6 +5,8 @@
 越界直接丢弃，不钳位。悄悄把 99 改成 8 执行，比拒绝危险得多。
 """
 
+from __future__ import annotations
+
 from ..config import settings
 from ..protocol import CloudActionEnvelope, NlConst
 

@@ -190,6 +190,11 @@ export class BodyNotesState {
     return true;
   }
 
+  appendQuickNote(text) {
+    const targetSessionId = this._sessions[0]?.session_id || "demo-session-03";
+    return this.addNote(targetSessionId, text);
+  }
+
   async addNote(sessionId, text) {
     if (this.mutationsLocked) return null;
     const trimmed = text.trim();

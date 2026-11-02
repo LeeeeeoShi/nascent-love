@@ -1,5 +1,7 @@
 """B 层 Agent 编排：取记忆、构造上下文、调用模型。"""
 
+from __future__ import annotations
+
 import asyncio
 from time import perf_counter
 

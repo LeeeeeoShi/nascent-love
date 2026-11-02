@@ -19,6 +19,7 @@ from .agent_contract import (
     TemplateDraftRequest,
 )
 from .body_note_contract import BodyInsightModelOutput
+from .json_repair import repair_and_parse_json
 from .prompt_builder import build_messages
 from .providers import anthropic, openai_compat
 
@@ -54,12 +55,14 @@ async def generate_turn(request: AgentTurnRequest, memories: list) -> AgentTurn:
     try:
         content = await complete_json(
             model=settings.chat_llm_model or settings.llm_model,
+            base_url=settings.resolved_chat_base_url,
             messages=build_messages(request, memories),
             timeout_s=settings.chat_llm_timeout_s,
             temperature=0.85,
             max_tokens=700,
         )
-        result = AgentTurn.model_validate_json(content)
+        parsed = repair_and_parse_json(content)
+        result = AgentTurn.model_validate(parsed)
         allowed_skills = {
             skill.skill_id for skill in request.active_template.skills
         } if request.active_template else set()
@@ -107,7 +110,8 @@ async def generate_control(request: ControlDecisionRequest) -> ControlDecision:
             temperature=0.1,
             max_tokens=180,
         )
-        result = ControlDecision.model_validate_json(content)
+        parsed = repair_and_parse_json(content)
+        result = ControlDecision.model_validate(parsed)
         return _apply_control_policy(
             result,
             request.template_skill_allowlist,

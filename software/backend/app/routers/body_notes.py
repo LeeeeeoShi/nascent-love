@@ -1,5 +1,7 @@
 """身体笔记、删除和自我探索接口。"""
 
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 
 from ..services import llm

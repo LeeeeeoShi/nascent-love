@@ -35,8 +35,9 @@ BootKey::Event BootKey::poll(uint32_t now_ms) {
       pressed_ = false;
       resume_fired_ = false;
 
-      // 长按已经在按住期间触发过，松手不再补一次事件。
-      if (was_pressed && !fired && held <= NL_BOOT_STOP_MAX_MS) {
+      // 消除 600ms~2000ms 盲区：任何在长按解闩锁阈值前松手的有效按压，一律判定为停机。
+      // 避免用户在慌乱中按住 700ms 松手导致停机失效。
+      if (was_pressed && !fired && held < NL_BOOT_RESUME_HOLD_MS) {
         return Event::kStop;
       }
       return Event::kNone;

@@ -7,7 +7,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from typing import Optional
+from datetime import datetime, timedelta, timezone
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -23,7 +28,7 @@ from .body_note_contract import (
 )
 
 
-InsightGenerator = Callable[[str, str, list[dict[str, object]]], Awaitable[tuple[str, str | None, bool]]]
+InsightGenerator = Callable[[str, str, list[dict[str, object]]], Awaitable[tuple[str, Optional[str], bool]]]
 
 
 def _now() -> datetime:
