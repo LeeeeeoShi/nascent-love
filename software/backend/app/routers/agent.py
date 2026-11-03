@@ -10,6 +10,13 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from ..services import agent, llm, template
+from ..services.adaptive_rhythm import (
+    AdaptivePreferenceRecordResponse,
+    AdaptivePreferenceRequest,
+    calculate_adaptive_irpi,
+    get_or_create_adaptive_session,
+    reset_adaptive_session,
+)
 from ..services.agent_contract import (
     AgentTurn,
     AgentTurnRequest,
@@ -140,6 +147,31 @@ async def observe_preference(
     return PreferenceRecordResponse(result=result, snapshot=snapshot)
 
 
+@router.post("/preferences/observe-adaptive", response_model=AdaptivePreferenceRecordResponse)
+async def observe_adaptive_preference(
+    request: AdaptivePreferenceRequest,
+) -> AdaptivePreferenceRecordResponse:
+    dual_engine, modulator, entrainment_filter = get_or_create_adaptive_session(
+        request.observation.user_id, request.observation.persona_id
+    )
+    coherence, bohlen_active, bohlen_hz = 0.0, False, None
+    for sample in request.fsr_samples:
+        coherence, bohlen_active, bohlen_hz = entrainment_filter.feed_sample(sample)
+
+    result = calculate_adaptive_irpi(
+        observation=request.observation,
+        dual_engine=dual_engine,
+        modulator=modulator,
+        dt_s=request.dt_s,
+        autonomic_stress=request.autonomic_stress,
+        rhythm_coherence=coherence,
+        bohlen_active=bohlen_active,
+        bohlen_hz=bohlen_hz,
+    )
+    snapshot = await preference_store.record(request.observation, result)
+    return AdaptivePreferenceRecordResponse(result=result, snapshot=snapshot)
+
+
 @router.get("/preferences", response_model=list[PreferenceSnapshot])
 async def list_preferences(
     user_id: str, persona_id: str, template_id: str
@@ -153,6 +185,7 @@ async def list_preferences(
 async def delete_preferences(
     user_id: str, persona_id: str, template_id: str | None = None
 ) -> dict[str, int]:
+    reset_adaptive_session(user_id=user_id, persona_id=persona_id)
     return {
         "deleted_count": await preference_store.delete_scope(
             user_id=user_id, persona_id=persona_id, template_id=template_id
