@@ -114,9 +114,20 @@ NASCENT_MODERATION_ENABLED=true
 - `POST /v1/speech/speak`：把 Chat 9B 台词交给云端 TTS，返回 `audio/mpeg`。请求可带 `voice`、`tts_style`（温柔/俏皮/低语/平静/着急/开心）和 `provider`（`minimax` | `mimo`）。默认 MiniMax `speech-02-turbo` + `junlang_nanyou`。失败且硅基流动可用时降 CosyVoice 对应声。前端失败只保留字幕。
 - `POST /v1/speech/clone`：后端保留，本轮 Web UI 不调用。自定义人设上传音频只记在本机。
 - `POST /v1/agent/parallel-turn`：同一回合并行执行 Chat 9B 与 Control 9B，分别降级，并返回可展示的数据走向。
-- `POST /v1/agent/preferences/observe`：计算并记录一次脱敏偏好观察。
+- `POST /v1/agent/preferences/observe`：计算并记录一次基础静态脱敏偏好观察 (IRPI v1.0)。
+- `POST /v1/agent/preferences/observe-adaptive`：**自适应生物反馈与抗感觉疲劳偏好观察 (IRPI v2.0)**。结合连续平滑混合权重、Bancroft 双控制状态机 (SES/SIS1/SIS2)、Leung & Bensmaia (2005) 感觉脱敏微分积分器、Qi & Ginty (Nature 2024) 克劳斯小体 (40~80Hz) 频段调制、呼吸潮汐包络 (18% 回弹)、粉红噪声随机共振微抖动与 Bohlen 骨盆收缩锁相环。
 - `GET /v1/agent/preferences`：读取当前用户/人设/模板的偏好快照。
-- `DELETE /v1/agent/preferences`：删除当前人设或模板的偏好快照。
+- `DELETE /v1/agent/preferences`：删除当前人设或模板的偏好快照（同时重置对应的自适应生物反馈动力学状态机）。
+
+## 生物反馈与自适应算法仿真套件
+
+算法的底层生理学与心理学理论依据见 [`docs/research/`](../../docs/research/)。
+
+在本地运行动力学基准测试（包含 Leung & Bensmaia 感觉疲劳对比、Bancroft 双控制制动时延、Bohlen 骨盆肌电锁相与 15 分钟全旅程模拟）：
+
+```bash
+.venv/bin/python3 simulations/simulate_adaptive_rhythm.py
+```
 
 Skill 建议不能直接控制硬件；共享 Web UI 必须再次检查模板状态、用户确认、当前模式和 `Governor`，然后只通过 `sendCommand()` 发出允许的协议命令。Android 壳只提供原生 GATT 桥，不在 Kotlin 中重写这套规则。失控模式不接受 Agent 调度。
 
